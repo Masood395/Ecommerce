@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fixed E-Commerce Frontend</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    section { margin: 20px 0; }
+    input, button, select { margin: 5px; padding: 6px; }
+    .hidden { display: none; }
+    .product-card { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>🛒 E-Commerce with Cart + Orders</h1>
+
+  <section id="authTabs">
+    <button onclick="showLogin()">Login</button>
+    <button onclick="showRegister()">Register</button>
+  </section>
+
+  <section id="registerSection" class="hidden">
+    <h2>📝 Register</h2>
+    <input type="text" id="regUsername" placeholder="Username" />
+    <input type="password" id="regPassword" placeholder="Password" />
+    <select id="regRole">
+      <option value="ROLE_CUSTOMER">Customer</option>
+      <option value="ROLE_ADMIN">Admin</option>
+    </select>
+    <button onclick="register()">Register</button>
+    <p id="registerStatus"></p>
+  </section>
+
+  <section id="loginSection">
+    <h2>🔐 Login</h2>
+    <input type="text" id="username" placeholder="Username" />
+    <input type="password" id="password" placeholder="Password" />
+    <button onclick="login()">Login</button>
+    <p id="loginStatus"></p>
+  </section>
+
+  <section id="logoutSection" class="hidden">
+    <p>Logged in as: <span id="loggedUser"></span> (<span id="userRole"></span>)</p>
+    <button onclick="logout()">Logout</button>
+  </section>
+
+  <section id="productSection" class="hidden">
+    <h2>📦 Product List</h2>
+    <div id="productList"></div>
+  </section>
+
+  <section id="adminSection" class="hidden">
+    <h2>➕ Add Product (Admin)</h2>
+    <input type="text" id="pname" placeholder="Name" />
+    <input type="text" id="pdesc" placeholder="Description" />
+    <input type="number" id="pprice" placeholder="Price" />
+    <button onclick="addProduct()">Add</button>
+  </section>
+
+  <section id="customerSection" class="hidden">
+    <h2>🛍️ My Cart</h2>
+    <div id="cartList"></div>
+    <h3>📦 Place Order</h3>
+    <button onclick="placeOrder()">Place Order</button>
+  </section>
+
+  <section id="orderSection" class="hidden">
+    <h2>📋 My Orders</h2>
+    <div id="orderList"></div>
+  </section>
+
+  <script>
+    let token = "";
+    let role = "";
+
+    function showLogin() {
+      document.getElementById("loginSection").classList.remove("hidden");
+      document.getElementById("registerSection").classList.add("hidden");
+    }
+
+    function showRegister() {
+      document.getElementById("registerSection").classList.remove("hidden");
+      document.getElementById("loginSection").classList.add("hidden");
+    }
+
+    function register() {
+      const username = document.getElementById("regUsername").value;
+      const password = document.getElementById("regPassword").value;
+      const role = document.getElementById("regRole").value;
+
+      fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, role })
+      })
+      .then(res => res.text())
+      .then(msg => {
+        document.getElementById("registerStatus").innerText = msg;
+        showLogin();
+      })
+      .catch(() => {
+        document.getElementById("registerStatus").innerText = "Registration failed";
+      });
+    }
+
+    function login() {
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+
+      fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      })
+      .then(res => res.text())
+      .then(jwt => {
+        token = jwt;
+        const payload = JSON.parse(atob(jwt.split('.')[1]));
+        role = payload.sub.includes("admin") ? "ROLE_ADMIN" : "ROLE_CUSTOMER";
+
+        document.getElementById("loginSection").classList.add("hidden");
+        document.getElementById("logoutSection").classList.remove("hidden");
+        document.getElementById("productSection").classList.remove("hidden");
+
+        document.getElementById("loggedUser").innerText = payload.sub;
+        document.getElementById("userRole").innerText = role;
+
+        if (role === "ROLE_ADMIN") {
+          document.getElementById("adminSection").classList.remove("hidden");
+        } else {
+          document.getElementById("customerSection").classList.remove("hidden");
+          document.getElementById("orderSection").classList.remove("hidden");
+        }
+
+        loadProducts();
+        if (role === "ROLE_CUSTOMER") viewCart();
+        if (role === "ROLE_CUSTOMER") viewOrders();
+      })
+      .catch(() => {
+        document.getElementById("loginStatus").innerText = "Login failed";
+      });
+    }
+
+    function logout() {
+      token = "";
+      role = "";
+      location.reload();
+    }
+
+    function loadProducts() {
+      fetch("/api/products", {
+        headers: { "Authorization": "Bearer " + token }
+      })
+      .then(res => res.json())
+      .then(data => {
+        const list = document.getElementById("productList");
+        list.innerHTML = "";
+        data.forEach(p => {
+          const card = document.createElement("div");
+          card.className = "product-card";
+          card.innerHTML = `<strong>${p.name}</strong><br>${p.description}<br>₹${p.price}`;
+          if (role === "ROLE_CUSTOMER") {
+            const btn = document.createElement("button");
+            btn.innerText = "Add to Cart";
+            btn.onclick = () => addToCart(p.id);
+            card.appendChild(btn);
+          }
+          list.appendChild(card);
+        });
+      });
+    }
+
+    function addProduct() {
+      const name = document.getElementById("pname").value;
+      const description = document.getElementById("pdesc").value;
+      const price = document.getElementById("pprice").value;
+
+      fetch("/api/products", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ name, description, price })
+      })
+      .then(() => loadProducts());
+    }
+
+    function addToCart(productId) {
+      fetch(`/api/cart/add?productId=${productId}&quantity=1`, {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token }
+      }).then(() => viewCart());
+    }
+
+    function viewCart() {
+      fetch("/api/cart", {
+        headers: { "Authorization": "Bearer " + token }
+      })
+      .then(res => res.json())
+      .then(cart => {
+        const cartList = document.getElementById("cartList");
+        cartList.innerHTML = "";
+        cart.items.forEach(item => {
+          const div = document.createElement("div");
+          div.innerText = `${item.product.name} x ${item.quantity}`;
+          cartList.appendChild(div);
+        });
+      });
+    }
+
+    function placeOrder() {
+      fetch("/api/orders/place", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token }
+      })
+      .then(res => res.json())
+      .then(data => {
+        alert(`Order placed with ${data.items.length} item(s).`);
+        viewOrders();
+        viewCart();
+      });
+    }
+
+    function viewOrders() {
+      fetch("/api/orders", {
+        headers: { "Authorization": "Bearer " + token }
+      })
+      .then(res => res.json())
+      .then(data => {
+        const list = document.getElementById("orderList");
+        list.innerHTML = "";
+        data.forEach(order => {
+          const div = document.createElement("div");
+          div.innerHTML = `<b>Order #${order.id}</b> (${new Date(order.date).toLocaleString()})<br>` +
+            order.items.map(i => `${i.product.name} x${i.quantity}`).join(", ");
+          list.appendChild(div);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
